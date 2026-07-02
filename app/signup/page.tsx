@@ -23,7 +23,7 @@ export default function SignupPage() {
         emailRedirectTo: `${window.location.origin}/dashboard`
       }
     })
-    if (error) { setError(error.message); setLoading(false); return }
+    if (error) { setError(error.message || 'Signup failed. Please try again.'); setLoading(false); return }
     setStep(2)
     setLoading(false)
   }
@@ -37,7 +37,7 @@ export default function SignupPage() {
       token: form.otp,
       type: 'signup'
     })
-    if (error) { setError(error.message); setLoading(false); return }
+    if (error) { setError(error.message || 'Invalid code. Please try again.'); setLoading(false); return }
     router.push('/dashboard')
   }
 
