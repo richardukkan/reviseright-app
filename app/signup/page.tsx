@@ -9,22 +9,36 @@ export default function SignupPage() {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', otp: '' })
+  const [form, setForm] = useState({ name: '', email: '', phone: '', classLevel: '8', password: '', otp: '' })
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError('')
-    const { error } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: {
-        data: { name: form.name, phone: form.phone },
-        emailRedirectTo: `${window.location.origin}/dashboard`
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: {
+          data: { name: form.name, phone: form.phone, class_level: parseInt(form.classLevel) },
+          emailRedirectTo: `${window.location.origin}/dashboard`
+        }
+      })
+      console.log('Signup response:', { data, error })
+      if (error) {
+        setError(error.message || JSON.stringify(error))
+        setLoading(false)
+        return
       }
-    })
-    if (error) { setError(error.message || 'Signup failed. Please try again.'); setLoading(false); return }
-    setStep(2)
+      if (data?.user) {
+        setStep(2)
+      } else {
+        setError('Signup failed — please try again.')
+      }
+    } catch (err: any) {
+      console.error('Signup error:', err)
+      setError(err?.message || 'An unexpected error occurred. Please try again.')
+    }
     setLoading(false)
   }
 
@@ -32,32 +46,41 @@ export default function SignupPage() {
     e.preventDefault()
     setLoading(true)
     setError('')
-    const { error } = await supabase.auth.verifyOtp({
-      email: form.email,
-      token: form.otp,
-      type: 'signup'
-    })
-    if (error) { setError(error.message || 'Invalid code. Please try again.'); setLoading(false); return }
-    router.push('/dashboard')
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        email: form.email,
+        token: form.otp,
+        type: 'signup'
+      })
+      if (error) {
+        setError(error.message || 'Invalid code. Please try again.')
+        setLoading(false)
+        return
+      }
+      router.push('/dashboard')
+    } catch (err: any) {
+      setError(err?.message || 'Verification failed. Please try again.')
+    }
+    setLoading(false)
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center gap-2 mb-6">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-medium text-sm">R</div>
-            <span className="text-blue-600 font-medium text-lg">ReviseRight</span>
+    <div style={{minHeight:'100vh',background:'#F9FAFB',display:'flex',alignItems:'center',justifyContent:'center',padding:'1rem'}}>
+      <div style={{width:'100%',maxWidth:'440px'}}>
+        <div style={{textAlign:'center',marginBottom:'2rem'}}>
+          <Link href="/" style={{display:'inline-flex',alignItems:'center',gap:'8px',marginBottom:'1.5rem',textDecoration:'none'}}>
+            <div style={{width:'32px',height:'32px',background:'#2563EB',borderRadius:'8px',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:'500',fontSize:'16px'}}>R</div>
+            <span style={{color:'#2563EB',fontWeight:'500',fontSize:'18px'}}>ReviseRight</span>
           </Link>
-          <h1 className="text-2xl font-medium text-gray-900">{step === 1 ? 'Create your account' : 'Verify your email'}</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            {step === 1 ? 'Start with 10 free pages — no credit card needed' : `We sent a code to ${form.email}`}
+          <h1 style={{fontSize:'24px',fontWeight:'500',color:'#111827'}}>{step === 1 ? 'Create your account' : 'Verify your email'}</h1>
+          <p style={{color:'#6B7280',fontSize:'14px',marginTop:'4px'}}>
+            {step === 1 ? 'Start with 10 free pages — no credit card needed' : `We sent a 6-digit code to ${form.email}`}
           </p>
         </div>
 
-        <div className="card">
+        <div style={{background:'#fff',border:'1px solid #E5E7EB',borderRadius:'12px',padding:'1.5rem'}}>
           {step === 1 ? (
-            <form onSubmit={handleSignup} className="space-y-4">
+            <form onSubmit={handleSignup} style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
               <div>
                 <label className="label">Full name</label>
                 <input className="input" type="text" required placeholder="Priya Sharma"
@@ -75,41 +98,41 @@ export default function SignupPage() {
               </div>
               <div>
                 <label className="label">Which class?</label>
-                <select className="input" onChange={e => setForm({...form, ...form})}>
+                <select className="input" value={form.classLevel} onChange={e => setForm({...form, classLevel: e.target.value})}>
                   {[1,2,3,4,5,6,7,8,9,10].map(c => <option key={c} value={c}>Class {c}</option>)}
                 </select>
               </div>
               <div>
                 <label className="label">Password</label>
-                <input className="input" type="password" required placeholder="Minimum 8 characters" minLength={8}
+                <input className="input" type="password" required placeholder="Minimum 6 characters" minLength={6}
                   value={form.password} onChange={e => setForm({...form, password: e.target.value})} />
               </div>
-              {error && <p className="text-red-500 text-sm">{error}</p>}
-              <button type="submit" disabled={loading} className="btn-primary w-full justify-center">
+              {error && <div style={{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:'8px',padding:'0.75rem',color:'#DC2626',fontSize:'14px'}}>{error}</div>}
+              <button type="submit" disabled={loading} className="btn-primary" style={{justifyContent:'center',padding:'10px',fontSize:'15px',opacity:loading?0.7:1}}>
                 {loading ? 'Creating account...' : 'Create account'}
               </button>
             </form>
           ) : (
-            <form onSubmit={handleVerifyOtp} className="space-y-4">
+            <form onSubmit={handleVerifyOtp} style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
               <div>
                 <label className="label">Enter the 6-digit code from your email</label>
-                <input className="input text-center text-xl tracking-widest" type="text" required
-                  maxLength={6} placeholder="000000"
+                <input className="input" type="text" required maxLength={6} placeholder="000000"
+                  style={{textAlign:'center',fontSize:'20px',letterSpacing:'0.2em'}}
                   value={form.otp} onChange={e => setForm({...form, otp: e.target.value})} />
               </div>
-              {error && <p className="text-red-500 text-sm">{error}</p>}
-              <button type="submit" disabled={loading} className="btn-primary w-full justify-center">
+              {error && <div style={{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:'8px',padding:'0.75rem',color:'#DC2626',fontSize:'14px'}}>{error}</div>}
+              <button type="submit" disabled={loading} className="btn-primary" style={{justifyContent:'center',padding:'10px',fontSize:'15px',opacity:loading?0.7:1}}>
                 {loading ? 'Verifying...' : 'Verify email'}
               </button>
-              <button type="button" onClick={() => setStep(1)} className="text-sm text-gray-500 w-full text-center">
+              <button type="button" onClick={() => setStep(1)} style={{background:'none',border:'none',color:'#6B7280',fontSize:'14px',cursor:'pointer',textAlign:'center'}}>
                 Go back
               </button>
             </form>
           )}
         </div>
 
-        <p className="text-center text-sm text-gray-500 mt-4">
-          Already have an account? <Link href="/login" className="text-blue-600 hover:underline">Log in</Link>
+        <p style={{textAlign:'center',fontSize:'14px',color:'#6B7280',marginTop:'1rem'}}>
+          Already have an account? <Link href="/login" style={{color:'#2563EB'}}>Log in</Link>
         </p>
       </div>
     </div>
