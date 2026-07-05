@@ -82,6 +82,9 @@ export default function PricingPage() {
     { key: 'champion', ...PLANS.champion },
   ]
 
+  const expiresAt = profile?.plan_expires_at ? new Date(profile.plan_expires_at) : null
+  const daysLeft = expiresAt ? Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : null
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar user={user} />
@@ -111,8 +114,20 @@ export default function PricingPage() {
                     <span className={plan.pdf ? 'text-blue-600' : 'text-gray-300'}>{plan.pdf ? '✓' : '✗'}</span>PDF download
                   </li>
                 </ul>
-                {isCurrent ? (
+                {isCurrent && plan.price === 0 ? (
                   <div className="w-full text-center py-2 text-sm text-gray-400 border border-gray-100 rounded-lg">Current plan</div>
+                ) : isCurrent ? (
+                  <div className="space-y-2">
+                    <div className="w-full text-center py-2 text-xs text-gray-500 border border-gray-100 rounded-lg">
+                      {daysLeft !== null && daysLeft > 0
+                        ? `Renews in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`
+                        : 'Expired — renew below'}
+                    </div>
+                    <button onClick={() => handleUpgrade(plan.key)} disabled={loading && selectedPlan === plan.key}
+                      className="w-full py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
+                      {loading && selectedPlan === plan.key ? 'Loading...' : 'Renew now'}
+                    </button>
+                  </div>
                 ) : plan.price === 0 ? (
                   <Link href="/signup" className="block w-full text-center py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Get started free</Link>
                 ) : (
