@@ -5,7 +5,6 @@ import { supabaseAdmin } from '@/lib/supabase'
 export async function POST(req: NextRequest) {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, planKey, userId } = await req.json()
-
     const body = razorpay_order_id + '|' + razorpay_payment_id
     const expectedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
@@ -16,10 +15,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid signature' }, { status: 400 })
     }
 
-    // Update user plan
-    await supabaseAdmin.from('profiles').update({ plan: planKey }).eq('id', userId)
+    // Set new plan, 30-day expiry from now, and reset usage for the new billing cycle
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
-    return NextResponse.json({ success: true })
+    await supabaseAdmin
+      .from('profiles')
+      .update({
+        plan: planKey,
+        plan_expires_at: expiresAt,
+        pages_used: 0,
+        pages_reset_at: new Date().toISOString(),
+      })
+      .eq('id', userId)
+
+    return NextResponse.json({ success: true, expiresAt })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
