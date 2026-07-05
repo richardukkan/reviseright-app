@@ -68,6 +68,13 @@ export default function GeneratePage() {
     setPreviews(newPreviews)
   }
 
+  const deleteImage = (index: number) => {
+    const newFiles = files.filter((_, i) => i !== index)
+    const newPreviews = previews.filter((_, i) => i !== index)
+    setFiles(newFiles)
+    setPreviews(newPreviews)
+  }
+
   const moveImage = (from: number, to: number) => {
     const newFiles = [...files]
     const newPreviews = [...previews]
@@ -151,6 +158,7 @@ export default function GeneratePage() {
                       {i > 0 && <button onClick={() => moveImage(i, i-1)} style={{background:'#fff',border:'1px solid #E5E7EB',borderRadius:'4px',fontSize:'10px',padding:'1px 4px',cursor:'pointer'}}>←</button>}
                       {i < previews.length-1 && <button onClick={() => moveImage(i, i+1)} style={{background:'#fff',border:'1px solid #E5E7EB',borderRadius:'4px',fontSize:'10px',padding:'1px 4px',cursor:'pointer'}}>→</button>}
                     </div>
+                    <button onClick={() => deleteImage(i)} style={{position:'absolute',bottom:'4px',right:'4px',background:'#EF4444',border:'none',borderRadius:'4px',color:'#fff',fontSize:'10px',padding:'2px 5px',cursor:'pointer',lineHeight:1}}>✕</button>
                   </div>
                 ))}
               </div>
