@@ -159,7 +159,6 @@ export default function ResultsContent() {
           <div style={{background:'#EFF6FF',border:'1px solid #DBEAFE',borderRadius:'0.75rem',padding:'1rem 1.25rem',marginBottom:'1.5rem',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'1rem'}}>
             <div>
               <p style={{fontSize:'0.875rem',fontWeight:'500',color:'#1E3A8A'}}>PDF download on Topper & Champion plans</p>
-              <p style={{fontSize:'0.75rem',color:'#2563EB',marginTop:'0.125rem'}}>Watermarked with your name and email</p>
             </div>
             <Link href="/pricing" className="btn-primary" style={{fontSize:'0.8125rem',padding:'0.5rem 1rem',flexShrink:0}}>Upgrade</Link>
           </div>
