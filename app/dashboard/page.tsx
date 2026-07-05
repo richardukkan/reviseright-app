@@ -18,7 +18,31 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
       setUser(user)
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+
+      let { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+
+      // Check for expired paid plan and downgrade to Free if lapsed
+      if (
+        profile &&
+        profile.plan !== 'free' &&
+        profile.plan_expires_at &&
+        new Date(profile.plan_expires_at) < new Date()
+      ) {
+        await supabase
+          .from('profiles')
+          .update({
+            plan: 'free',
+            pages_used: 0,
+            pages_reset_at: new Date().toISOString(),
+            plan_expires_at: null,
+          })
+          .eq('id', user.id)
+
+        // Re-fetch so the UI reflects the downgrade immediately
+        const { data: refreshed } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+        profile = refreshed
+      }
+
       setProfile(profile)
       const { data: sets } = await supabase.from('question_sets').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10)
       setHistory(sets || [])
@@ -33,6 +57,9 @@ export default function DashboardPage() {
   const pagesUsed = profile?.pages_used || 0
   const pagesTotal = plan.pages
   const pagesPercent = Math.min((pagesUsed / pagesTotal) * 100, 100)
+
+  const expiresAt = profile?.plan_expires_at ? new Date(profile.plan_expires_at) : null
+  const daysLeft = expiresAt ? Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : null
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -60,6 +87,13 @@ export default function DashboardPage() {
               <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${pagesPercent}%` }} />
             </div>
             <p className="text-xs text-gray-400 mt-2">{pagesTotal - pagesUsed} pages remaining this month</p>
+            {expiresAt && daysLeft !== null && (
+              <p className="text-xs text-gray-400 mt-1">
+                {daysLeft > 0
+                  ? `Renews in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${expiresAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})`
+                  : 'Plan expired — renew to keep your pages'}
+              </p>
+            )}
           </div>
           <div className="card flex flex-col items-center justify-center text-center">
             <p className="text-sm text-gray-500 mb-2">Want more pages?</p>
