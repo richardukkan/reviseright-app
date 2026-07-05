@@ -55,20 +55,16 @@ export default function ResultsContent() {
     setDownloading(true)
     try {
       const { jsPDF } = await import('jspdf')
-      const doc = new jsPDF()
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
       const questions = questionSet.questions || []
-
-      doc.setFontSize(16)
-      doc.setFont('helvetica', 'bold')
-      doc.text(`${questionSet.subject} — Class ${questionSet.class_level}`, 15, 20)
-
-      doc.setFontSize(8)
-      doc.setTextColor(150, 150, 150)
-      doc.text(`Generated for: ${profile.name} | ${profile.email} | ${profile.phone || ''}`, 15, 30)
-      doc.text('ReviseRight.in | Not for redistribution', 15, 35)
-
-      doc.setTextColor(0, 0, 0)
-      let y = 48
+      const pageW = 210
+      const marginL = 15
+      const marginR = 15
+      const contentW = pageW - marginL - marginR  // 180mm
+      const pageH = 297
+      const marginTop = 28
+      const marginBottom = 22
+      const maxY = pageH - marginBottom
 
       const typeLabels: Record<string, string> = {
         mcq: 'MCQ', fill: 'Fill in the Blank', truefalse: 'True or False',
@@ -76,47 +72,158 @@ export default function ResultsContent() {
         match: 'Match the Following', define: 'Define', critical: 'Critical Thinking'
       }
 
-      const addWatermark = () => {
+      const watermarkText = `⚠ Generated for: ${profile.name} | ${profile.email}${profile.phone ? ' | ' + profile.phone : ''} — ReviseRight.in | NOT FOR REDISTRIBUTION`
+
+      const addPageDecorations = () => {
+        // Top watermark - prominent warning
+        doc.setFillColor(255, 243, 205)
+        doc.rect(marginL, 5, contentW, 10, 'F')
+        doc.setDrawColor(255, 193, 7)
+        doc.rect(marginL, 5, contentW, 10, 'S')
         doc.setFontSize(7)
-        doc.setTextColor(210, 210, 210)
-        doc.text(`${profile.name} | ${profile.email} | ReviseRight.in`, 15, 288)
+        doc.setFont('helvetica', 'bold')
+        doc.setTextColor(133, 77, 14)
+        const wmLines = doc.splitTextToSize(watermarkText, contentW - 4)
+        doc.text(wmLines, marginL + 2, 11)
+
+        // Bottom watermark - subtle
+        doc.setFontSize(7)
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(180, 180, 180)
+        doc.text(`${profile.name} | ${profile.email} | ReviseRight.in`, marginL, pageH - 5)
+        doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageW - marginR, pageH - 5, { align: 'right' })
+
+        // Reset
         doc.setTextColor(0, 0, 0)
+        doc.setDrawColor(0, 0, 0)
       }
 
-      questions.forEach((q: any, i: number) => {
-        if (y > 255) { addWatermark(); doc.addPage(); y = 20 }
-
-        doc.setFontSize(9)
-        doc.setFont('helvetica', 'bold')
-        doc.setTextColor(37, 99, 235)
-        doc.text(`[${typeLabels[q.type] || q.type?.toUpperCase()}]`, 15, y)
-        doc.setTextColor(0, 0, 0)
-
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(10)
-        const qLines = doc.splitTextToSize(`${i + 1}. ${q.question}`, 175)
-        doc.text(qLines, 30, y)
-        y += qLines.length * 5 + 2
-
-        if (q.options) {
-          q.options.forEach((opt: string) => {
-            if (y > 255) { addWatermark(); doc.addPage(); y = 20 }
-            const optLines = doc.splitTextToSize(`   ${opt}`, 170)
-            doc.text(optLines, 30, y)
-            y += optLines.length * 5
-          })
+      // Check if we need a new page
+      const checkPage = (neededHeight: number) => {
+        if (y + neededHeight > maxY) {
+          addPageDecorations()
+          doc.addPage()
+          y = marginTop
         }
+      }
 
-        doc.setFont('helvetica', 'italic')
-        doc.setTextColor(22, 101, 52)
-        const ansLines = doc.splitTextToSize(`Answer: ${q.answer}`, 175)
-        doc.text(ansLines, 30, y + 2)
-        doc.setTextColor(0, 0, 0)
-        y += ansLines.length * 5 + 10
+      let y = marginTop
 
-        addWatermark()
-        doc.setFontSize(10)
+      // Title page header
+      doc.setFontSize(18)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(37, 99, 235)
+      doc.text(`${questionSet.subject}`, marginL, y)
+      y += 8
+
+      doc.setFontSize(11)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(100, 100, 100)
+      doc.text(`Class ${questionSet.class_level}  ·  ${questions.length} Questions  ·  ReviseRight.in`, marginL, y)
+      y += 6
+
+      // Divider line
+      doc.setDrawColor(37, 99, 235)
+      doc.setLineWidth(0.5)
+      doc.line(marginL, y, pageW - marginR, y)
+      y += 8
+      doc.setLineWidth(0.2)
+      doc.setDrawColor(0, 0, 0)
+
+      // Group questions by type
+      const grouped: Record<string, any[]> = {}
+      questions.forEach((q: any) => {
+        if (!grouped[q.type]) grouped[q.type] = []
+        grouped[q.type].push(q)
       })
+
+      let globalNum = 1
+
+      Object.entries(grouped).forEach(([type, qs]) => {
+        // Section header
+        checkPage(16)
+        y += 4
+        doc.setFillColor(37, 99, 235)
+        doc.rect(marginL, y - 5, contentW, 8, 'F')
+        doc.setFontSize(10)
+        doc.setFont('helvetica', 'bold')
+        doc.setTextColor(255, 255, 255)
+        doc.text(`${typeLabels[type] || type}  (${qs.length} questions)`, marginL + 3, y)
+        y += 7
+        doc.setTextColor(0, 0, 0)
+
+        qs.forEach((q: any) => {
+          // Question number + text
+          checkPage(12)
+          y += 3
+
+          // Question label box
+          doc.setFillColor(240, 245, 255)
+          doc.setDrawColor(200, 215, 255)
+          const qLines = doc.splitTextToSize(`${globalNum}. ${q.question}`, contentW - 4)
+          const qBoxH = qLines.length * 5 + 6
+          checkPage(qBoxH)
+          doc.rect(marginL, y - 4, contentW, qBoxH, 'FD')
+          doc.setFontSize(10)
+          doc.setFont('helvetica', 'normal')
+          doc.setTextColor(17, 24, 39)
+          doc.text(qLines, marginL + 2, y)
+          y += qBoxH - 2
+
+          // Options for MCQ
+          if (q.options && q.options.length > 0) {
+            y += 2
+            // 2 options per row
+            const optPairs = []
+            for (let i = 0; i < q.options.length; i += 2) {
+              optPairs.push([q.options[i], q.options[i+1]])
+            }
+            optPairs.forEach(pair => {
+              checkPage(7)
+              doc.setFontSize(9.5)
+              doc.setFont('helvetica', 'normal')
+              doc.setTextColor(55, 65, 81)
+              const opt1 = doc.splitTextToSize(pair[0] || '', contentW / 2 - 5)
+              doc.text(opt1, marginL + 4, y)
+              if (pair[1]) {
+                const opt2 = doc.splitTextToSize(pair[1], contentW / 2 - 5)
+                doc.text(opt2, marginL + contentW / 2 + 2, y)
+              }
+              y += Math.max(opt1.length, 1) * 5
+            })
+          }
+
+          // Answer box
+          y += 2
+          const answerText = `Answer: ${q.answer}`
+          const ansLines = doc.splitTextToSize(answerText, contentW - 8)
+          const ansBoxH = ansLines.length * 5 + 6
+          checkPage(ansBoxH)
+          doc.setFillColor(240, 253, 244)
+          doc.setDrawColor(134, 239, 172)
+          doc.rect(marginL, y - 4, contentW, ansBoxH, 'FD')
+          doc.setFontSize(9.5)
+          doc.setFont('helvetica', 'bold')
+          doc.setTextColor(22, 101, 52)
+          // Write "Answer:" label
+          doc.text('Answer:', marginL + 2, y)
+          // Write answer text indented
+          doc.setFont('helvetica', 'normal')
+          const answerOnly = doc.splitTextToSize(q.answer, contentW - 22)
+          doc.text(answerOnly, marginL + 18, y)
+          y += Math.max(ansLines.length, answerOnly.length) * 5 + 2
+
+          doc.setTextColor(0, 0, 0)
+          doc.setDrawColor(0, 0, 0)
+
+          globalNum++
+        })
+
+        y += 4
+      })
+
+      // Add decorations to last page
+      addPageDecorations()
 
       doc.save(`ReviseRight-${questionSet.subject}-Class${questionSet.class_level}.pdf`)
     } catch (err) {
