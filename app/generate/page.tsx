@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import Navbar from '@/components/Navbar'
@@ -16,6 +16,12 @@ const QUESTION_TYPES = [
   { key: 'define', label: 'Define' },
   { key: 'critical', label: 'Critical Thinking' },
 ]
+
+// Question types not suitable for Maths
+const MATHS_DISABLED = ['truefalse', 'match', 'define', 'critical']
+const MATHS_SUBJECTS = ['maths', 'math', 'mathematics', 'ganit']
+
+const isMaths = (subject: string) => MATHS_SUBJECTS.includes(subject.toLowerCase().trim())
 
 export default function GeneratePage() {
   const router = useRouter()
@@ -42,9 +48,20 @@ export default function GeneratePage() {
     load()
   }, [router])
 
+  // Auto-adjust question types when subject changes
+  const handleSubjectChange = (val: string) => {
+    setSubject(val)
+    if (isMaths(val)) {
+      // For Maths: enable only suitable types, disable unsuitable ones
+      setSelected({ mcq: true, fill: true, truefalse: false, oneword: true, short: true, long: true, match: false, define: false, critical: false })
+    } else if (val === '' && isMaths(subject)) {
+      // Reset to defaults when clearing from maths
+      setSelected({ mcq: true, fill: true, short: true, critical: true })
+    }
+  }
+
   const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newFiles = Array.from(e.target.files || []).slice(0, 15)
-    // Sort by filename
     newFiles.sort((a, b) => a.name.localeCompare(b.name))
     setFiles(newFiles)
     const newPreviews = newFiles.map(f => URL.createObjectURL(f))
@@ -64,6 +81,7 @@ export default function GeneratePage() {
 
   const plan = PLANS[profile?.plan as keyof typeof PLANS] || PLANS.free
   const pagesRemaining = plan.pages - (profile?.pages_used || 0)
+  const mathsMode = isMaths(subject)
 
   const handleGenerate = async () => {
     if (files.length === 0) { setError('Please upload at least one page photo.'); return }
@@ -75,13 +93,9 @@ export default function GeneratePage() {
     setError('')
 
     try {
-      // Convert files to base64
       const images = await Promise.all(files.map(f => new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
-        reader.onload = () => {
-          const result = reader.result as string
-          resolve(result.split(',')[1])
-        }
+        reader.onload = () => resolve((reader.result as string).split(',')[1])
         reader.onerror = reject
         reader.readAsDataURL(f)
       })))
@@ -107,35 +121,35 @@ export default function GeneratePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div style={{minHeight:'100vh',background:'#F9FAFB'}}>
       <Navbar user={user} />
-      <div className="max-w-3xl mx-auto px-6 py-10">
-        <div className="mb-8">
-          <h1 className="text-2xl font-medium text-gray-900">Generate revision questions</h1>
-          <p className="text-gray-500 text-sm mt-1">Upload up to 15 textbook page photos at once</p>
+      <div style={{maxWidth:'700px',margin:'0 auto',padding:'2.5rem 1.5rem'}}>
+        <div style={{marginBottom:'2rem'}}>
+          <h1 style={{fontSize:'24px',fontWeight:'500',color:'#111827'}}>Generate revision questions</h1>
+          <p style={{color:'#6B7280',fontSize:'14px',marginTop:'4px'}}>Upload up to 15 textbook page photos at once</p>
         </div>
 
         {/* Step 1: Upload */}
-        <div className="card mb-4">
-          <h2 className="font-medium text-gray-900 mb-1">1. Upload page photos</h2>
-          <p className="text-xs text-gray-400 mb-4">Max 15 pages · {pagesRemaining} pages remaining this month</p>
-          <label className="block border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 transition-colors">
-            <input type="file" accept="image/*" multiple className="hidden" onChange={handleFiles} />
-            <div className="text-3xl mb-2">📸</div>
-            <p className="text-sm font-medium text-gray-700">Click to upload photos</p>
-            <p className="text-xs text-gray-400 mt-1">JPG, PNG · Up to 15 pages</p>
+        <div className="card" style={{marginBottom:'1rem'}}>
+          <h2 style={{fontWeight:'500',color:'#111827',marginBottom:'4px'}}>1. Upload page photos</h2>
+          <p style={{fontSize:'12px',color:'#9CA3AF',marginBottom:'1rem'}}>{pagesRemaining} pages remaining this month</p>
+          <label style={{display:'block',border:'2px dashed #E5E7EB',borderRadius:'12px',padding:'2rem',textAlign:'center',cursor:'pointer'}}>
+            <input type="file" accept="image/*" multiple style={{display:'none'}} onChange={handleFiles} />
+            <div style={{fontSize:'32px',marginBottom:'8px'}}>📸</div>
+            <p style={{fontSize:'14px',fontWeight:'500',color:'#374151'}}>Click to upload photos</p>
+            <p style={{fontSize:'12px',color:'#9CA3AF',marginTop:'4px'}}>JPG, PNG · Up to 15 pages</p>
           </label>
           {previews.length > 0 && (
-            <div className="mt-4">
-              <p className="text-xs text-gray-500 mb-2">{previews.length} pages uploaded — drag numbers to reorder</p>
-              <div className="grid grid-cols-5 gap-2">
+            <div style={{marginTop:'1rem'}}>
+              <p style={{fontSize:'12px',color:'#6B7280',marginBottom:'8px'}}>{previews.length} pages uploaded — use arrows to reorder</p>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'8px'}}>
                 {previews.map((p, i) => (
-                  <div key={i} className="relative group">
-                    <img src={p} alt={`Page ${i+1}`} className="w-full h-20 object-cover rounded-lg border border-gray-200" />
-                    <div className="absolute top-1 left-1 bg-blue-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium">{i+1}</div>
-                    <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {i > 0 && <button onClick={() => moveImage(i, i-1)} className="bg-white rounded text-xs px-1 border border-gray-200 shadow">←</button>}
-                      {i < previews.length-1 && <button onClick={() => moveImage(i, i+1)} className="bg-white rounded text-xs px-1 border border-gray-200 shadow">→</button>}
+                  <div key={i} style={{position:'relative'}}>
+                    <img src={p} alt={`Page ${i+1}`} style={{width:'100%',height:'80px',objectFit:'cover',borderRadius:'8px',border:'1px solid #E5E7EB'}} />
+                    <div style={{position:'absolute',top:'4px',left:'4px',background:'#2563EB',color:'#fff',fontSize:'11px',borderRadius:'50%',width:'20px',height:'20px',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'500'}}>{i+1}</div>
+                    <div style={{position:'absolute',top:'4px',right:'4px',display:'flex',gap:'2px'}}>
+                      {i > 0 && <button onClick={() => moveImage(i, i-1)} style={{background:'#fff',border:'1px solid #E5E7EB',borderRadius:'4px',fontSize:'10px',padding:'1px 4px',cursor:'pointer'}}>←</button>}
+                      {i < previews.length-1 && <button onClick={() => moveImage(i, i+1)} style={{background:'#fff',border:'1px solid #E5E7EB',borderRadius:'4px',fontSize:'10px',padding:'1px 4px',cursor:'pointer'}}>→</button>}
                     </div>
                   </div>
                 ))}
@@ -145,13 +159,13 @@ export default function GeneratePage() {
         </div>
 
         {/* Step 2: Details */}
-        <div className="card mb-4">
-          <h2 className="font-medium text-gray-900 mb-4">2. Chapter details</h2>
-          <div className="grid grid-cols-2 gap-4">
+        <div className="card" style={{marginBottom:'1rem'}}>
+          <h2 style={{fontWeight:'500',color:'#111827',marginBottom:'1rem'}}>2. Chapter details</h2>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem'}}>
             <div>
-              <label className="label">Subject <span className="text-gray-400 font-normal">(optional)</span></label>
-              <input className="input" type="text" placeholder="e.g. Science, History"
-                value={subject} onChange={e => setSubject(e.target.value)} />
+              <label className="label">Subject <span style={{color:'#9CA3AF',fontWeight:'400'}}>(optional)</span></label>
+              <input className="input" type="text" placeholder="e.g. Science, Maths, History"
+                value={subject} onChange={e => handleSubjectChange(e.target.value)} />
             </div>
             <div>
               <label className="label">Class</label>
@@ -160,45 +174,74 @@ export default function GeneratePage() {
               </select>
             </div>
           </div>
+          {/* Maths hint */}
+          {mathsMode && (
+            <div style={{marginTop:'1rem',background:'#FFF7ED',border:'1px solid #FED7AA',borderRadius:'8px',padding:'0.75rem 1rem',display:'flex',gap:'8px',alignItems:'flex-start'}}>
+              <span style={{fontSize:'16px'}}>📐</span>
+              <div>
+                <p style={{fontSize:'13px',fontWeight:'500',color:'#92400E'}}>Maths mode</p>
+                <p style={{fontSize:'12px',color:'#B45309',marginTop:'2px'}}>For Maths, we've pre-selected the best question types. Match the Following, Define, True/False and Critical Thinking have been disabled as they don't work well for Maths.</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Step 3: Question types */}
-        <div className="card mb-6">
-          <h2 className="font-medium text-gray-900 mb-4">3. Choose question types</h2>
-          <div className="space-y-2">
-            {QUESTION_TYPES.map(t => (
-              <div key={t.key} className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${selected[t.key] ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-white'}`}>
-                <label className="flex items-center gap-3 cursor-pointer flex-1">
-                  <input type="checkbox" checked={!!selected[t.key]}
-                    onChange={e => setSelected({...selected, [t.key]: e.target.checked})}
-                    className="accent-blue-600 w-4 h-4" />
-                  <span className="text-sm font-medium text-gray-700">{t.label}</span>
-                </label>
-                {selected[t.key] && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400">How many?</span>
-                    <select className="text-sm border border-gray-200 rounded px-2 py-1"
-                      value={counts[t.key]} onChange={e => setCounts({...counts, [t.key]: Number(e.target.value)})}>
-                      {[3,5,8,10,15,20].map(n => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
-            ))}
+        <div className="card" style={{marginBottom:'1.5rem'}}>
+          <h2 style={{fontWeight:'500',color:'#111827',marginBottom:'1rem'}}>3. Choose question types</h2>
+          <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+            {QUESTION_TYPES.map(t => {
+              const isDisabledForMaths = mathsMode && MATHS_DISABLED.includes(t.key)
+              return (
+                <div key={t.key} style={{
+                  display:'flex',alignItems:'center',justifyContent:'space-between',
+                  padding:'0.75rem',borderRadius:'8px',border:'1px solid',
+                  borderColor: isDisabledForMaths ? '#F3F4F6' : selected[t.key] ? '#BFDBFE' : '#E5E7EB',
+                  background: isDisabledForMaths ? '#F9FAFB' : selected[t.key] ? '#EFF6FF' : '#fff',
+                  opacity: isDisabledForMaths ? 0.5 : 1
+                }}>
+                  <label style={{display:'flex',alignItems:'center',gap:'10px',cursor: isDisabledForMaths ? 'not-allowed' : 'pointer',flex:1}}>
+                    <input type="checkbox"
+                      checked={!!selected[t.key]}
+                      disabled={isDisabledForMaths}
+                      onChange={e => !isDisabledForMaths && setSelected({...selected, [t.key]: e.target.checked})}
+                      style={{accentColor:'#2563EB',width:'16px',height:'16px'}} />
+                    <span style={{fontSize:'14px',fontWeight:'500',color: isDisabledForMaths ? '#9CA3AF' : '#374151'}}>
+                      {t.label}
+                      {isDisabledForMaths && <span style={{fontSize:'11px',marginLeft:'6px',color:'#9CA3AF'}}>not for Maths</span>}
+                    </span>
+                  </label>
+                  {selected[t.key] && !isDisabledForMaths && (
+                    <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                      <span style={{fontSize:'12px',color:'#9CA3AF'}}>How many?</span>
+                      <select style={{fontSize:'13px',border:'1px solid #E5E7EB',borderRadius:'6px',padding:'3px 6px'}}
+                        value={counts[t.key]} onChange={e => setCounts({...counts, [t.key]: Number(e.target.value)})}>
+                        {[3,5,8,10,15,20].map(n => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
 
-        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">{error}</div>}
+        {error && <div style={{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:'8px',padding:'0.75rem 1rem',color:'#DC2626',fontSize:'14px',marginBottom:'1rem'}}>{error}</div>}
 
         <button onClick={handleGenerate} disabled={generating || files.length === 0}
-          className="btn-primary w-full justify-center py-3 text-base disabled:opacity-50 disabled:cursor-not-allowed">
+          className="btn-primary"
+          style={{width:'100%',justifyContent:'center',padding:'12px',fontSize:'15px',opacity:(generating || files.length === 0) ? 0.6 : 1,cursor:(generating || files.length === 0) ? 'not-allowed' : 'pointer'}}>
           {generating ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              Generating questions... this may take 30–60 seconds
+            <span style={{display:'flex',alignItems:'center',gap:'8px'}}>
+              <svg style={{animation:'spin 1s linear infinite',width:'16px',height:'16px'}} viewBox="0 0 24 24" fill="none">
+                <circle style={{opacity:0.25}} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path style={{opacity:0.75}} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              Generating... this may take 30–60 seconds
             </span>
           ) : `Generate questions (${files.length} page${files.length !== 1 ? 's' : ''})`}
         </button>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       </div>
     </div>
   )
