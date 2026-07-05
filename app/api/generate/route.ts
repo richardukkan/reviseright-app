@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
 
+export const maxDuration = 60
+
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
 export async function POST(req: NextRequest) {
@@ -34,62 +36,43 @@ export async function POST(req: NextRequest) {
 
     // Build prompt
     const qtList = questionTypes.map((qt: any) => `- ${qt.count} ${qt.label} questions`).join('\n')
-    const systemPrompt = `You are an expert teacher creating revision questions for Indian school students. 
-Generate questions that are age-appropriate for Class ${classLevel} students (aged ${classLevel + 5}-${classLevel + 6} years).
-For Critical Thinking questions, create open-ended questions that require reasoning beyond what is directly stated in the text.
-Format your response as valid JSON only, with no markdown or extra text.`
+    const isMaths = ['maths', 'math', 'mathematics', 'ganit'].includes((subject || '').toLowerCase().trim())
 
-    const userPrompt = `Based on the textbook pages provided${subject ? ` about ${subject}` : ''}, generate the following revision questions for a Class ${classLevel} student:
+    const systemPrompt = `You are an expert Indian school teacher creating revision questions. 
+Generate questions appropriate for Class ${classLevel} students (aged ${classLevel + 5}-${classLevel + 6} years).
+${isMaths ? 'This is a Maths chapter. Focus on numerical problems, calculations, and problem-solving. Use actual numbers and equations from the textbook pages.' : 'For Critical Thinking questions, create open-ended questions requiring reasoning beyond the text.'}
+Return ONLY valid JSON. No markdown, no backticks, no explanation.`
+
+    const userPrompt = `Based on these textbook pages${subject ? ` (${subject})` : ''}, generate for Class ${classLevel}:
 
 ${qtList}
 
-Return ONLY a JSON object in this exact format:
+Return ONLY this JSON structure:
 {
-  "title": "Chapter title or topic name",
+  "title": "chapter topic",
   "questions": [
-    {
-      "type": "mcq",
-      "question": "Question text",
-      "options": ["A) option1", "B) option2", "C) option3", "D) option4"],
-      "answer": "B) option2"
-    },
-    {
-      "type": "fill",
-      "question": "The ___ is responsible for photosynthesis.",
-      "answer": "chloroplast"
-    },
-    {
-      "type": "truefalse",
-      "question": "Statement here.",
-      "answer": "True"
-    },
-    {
-      "type": "short",
-      "question": "Question?",
-      "answer": "Answer in 2-3 lines."
-    },
-    {
-      "type": "long",
-      "question": "Question?",
-      "answer": "Detailed answer in 6-8 lines."
-    },
-    {
-      "type": "critical",
-      "question": "Open-ended thinking question?",
-      "answer": "Model answer with reasoning."
-    }
+    {"type": "mcq", "question": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "answer": "A) ..."},
+    {"type": "fill", "question": "The ___ is ...", "answer": "..."},
+    {"type": "truefalse", "question": "...", "answer": "True"},
+    {"type": "oneword", "question": "...", "answer": "..."},
+    {"type": "short", "question": "...", "answer": "2-3 line answer"},
+    {"type": "long", "question": "...", "answer": "detailed answer"},
+    {"type": "match", "question": "Match: Column A vs Column B", "answer": "1-b, 2-a, 3-d"},
+    {"type": "define", "question": "Define ...", "answer": "..."},
+    {"type": "critical", "question": "Why/How/What if ...", "answer": "reasoning answer"}
   ]
 }`
 
-    // Build image content blocks
-    const imageBlocks = images.map((base64: string) => ({
+    // Build image content blocks — limit to first 10 images to avoid timeout
+    const imagesToProcess = images.slice(0, 10)
+    const imageBlocks = imagesToProcess.map((base64: string) => ({
       type: 'image' as const,
       source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: base64 }
     }))
 
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5',
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: systemPrompt,
       messages: [{
         role: 'user',
@@ -98,7 +81,20 @@ Return ONLY a JSON object in this exact format:
     })
 
     const rawText = response.content[0].type === 'text' ? response.content[0].text : ''
-    const cleanText = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    
+    // Clean and parse JSON
+    let cleanText = rawText
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim()
+    
+    // Find JSON object in case there's any surrounding text
+    const jsonStart = cleanText.indexOf('{')
+    const jsonEnd = cleanText.lastIndexOf('}')
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+      cleanText = cleanText.substring(jsonStart, jsonEnd + 1)
+    }
+
     const parsed = JSON.parse(cleanText)
 
     // Save to DB
@@ -119,6 +115,6 @@ Return ONLY a JSON object in this exact format:
     return NextResponse.json({ setId: questionSet.id, success: true })
   } catch (err: any) {
     console.error('Generate error:', err)
-    return NextResponse.json({ error: err.message || 'Generation failed' }, { status: 500 })
+    return NextResponse.json({ error: err.message || 'Generation failed. Please try with fewer pages or question types.' }, { status: 500 })
   }
 }
