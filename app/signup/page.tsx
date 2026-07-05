@@ -20,8 +20,7 @@ export default function SignupPage() {
         email: form.email,
         password: form.password,
         options: {
-          data: { name: form.name, phone: form.phone, class_level: parseInt(form.classLevel) },
-          emailRedirectTo: `${window.location.origin}/dashboard`
+          data: { name: form.name, phone: form.phone, class_level: parseInt(form.classLevel) }
         }
       })
       console.log('Signup response:', { data, error })
