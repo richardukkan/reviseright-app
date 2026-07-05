@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
@@ -57,14 +57,17 @@ export default function ResultsContent() {
       const { jsPDF } = await import('jspdf')
       const doc = new jsPDF({ unit: 'mm', format: 'a4' })
       const questions = questionSet.questions || []
+
+      // Page dimensions
       const pageW = 210
-      const marginL = 15
-      const marginR = 15
-      const contentW = pageW - marginL - marginR  // 180mm
       const pageH = 297
-      const marginTop = 28
-      const marginBottom = 22
-      const maxY = pageH - marginBottom
+      const mL = 15        // left margin
+      const mR = 15        // right margin
+      const cW = pageW - mL - mR  // content width = 180mm
+      const mTop = 30      // top margin (below watermark)
+      const mBot = 18      // bottom margin (above footer)
+      const maxY = pageH - mBot
+      const lineH = 5.5   // line height for body text
 
       const typeLabels: Record<string, string> = {
         mcq: 'MCQ', fill: 'Fill in the Blank', truefalse: 'True or False',
@@ -72,65 +75,83 @@ export default function ResultsContent() {
         match: 'Match the Following', define: 'Define', critical: 'Critical Thinking'
       }
 
-      const watermarkText = `⚠ Generated for: ${profile.name} | ${profile.email}${profile.phone ? ' | ' + profile.phone : ''} — ReviseRight.in | NOT FOR REDISTRIBUTION`
+      const name = profile.name || ''
+      const email = profile.email || ''
+      const phone = profile.phone || ''
 
-      const addPageDecorations = () => {
-        // Top watermark - prominent warning
+      // Draw top warning bar on current page
+      const drawTopBar = () => {
+        // Yellow warning background
         doc.setFillColor(255, 243, 205)
-        doc.rect(marginL, 5, contentW, 10, 'F')
-        doc.setDrawColor(255, 193, 7)
-        doc.rect(marginL, 5, contentW, 10, 'S')
+        doc.rect(mL, 4, cW, 12, 'F')
+        doc.setDrawColor(230, 160, 0)
+        doc.setLineWidth(0.4)
+        doc.rect(mL, 4, cW, 12, 'S')
+
+        // Warning text — two lines to avoid cutoff
         doc.setFontSize(7)
         doc.setFont('helvetica', 'bold')
-        doc.setTextColor(133, 77, 14)
-        const wmLines = doc.splitTextToSize(watermarkText, contentW - 4)
-        doc.text(wmLines, marginL + 2, 11)
+        doc.setTextColor(120, 60, 0)
+        const line1 = `⚠  GENERATED FOR: ${name}  |  ${email}${phone ? '  |  ' + phone : ''}`
+        const line2 = `ReviseRight.in  |  NOT FOR REDISTRIBUTION  |  Sharing this document is a violation of terms.`
+        doc.text(line1, mL + 2, 10, { maxWidth: cW - 4 })
+        doc.text(line2, mL + 2, 14.5, { maxWidth: cW - 4 })
+        doc.setLineWidth(0.2)
+      }
 
-        // Bottom watermark - subtle
+      // Draw bottom footer
+      const drawFooter = (pageNum: number) => {
         doc.setFontSize(7)
         doc.setFont('helvetica', 'normal')
-        doc.setTextColor(180, 180, 180)
-        doc.text(`${profile.name} | ${profile.email} | ReviseRight.in`, marginL, pageH - 5)
-        doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageW - marginR, pageH - 5, { align: 'right' })
-
-        // Reset
+        doc.setTextColor(160, 160, 160)
+        doc.text(`${name} | ${email} | ReviseRight.in`, mL, pageH - 5)
+        doc.text(`Page ${pageNum}`, pageW - mR, pageH - 5, { align: 'right' })
         doc.setTextColor(0, 0, 0)
-        doc.setDrawColor(0, 0, 0)
       }
 
-      // Check if we need a new page
-      const checkPage = (neededHeight: number) => {
-        if (y + neededHeight > maxY) {
-          addPageDecorations()
-          doc.addPage()
-          y = marginTop
-        }
+      let y = mTop
+      let currentPage = 1
+      drawTopBar()
+      drawFooter(currentPage)
+
+      // Add new page helper
+      const newPage = () => {
+        drawFooter(currentPage)
+        doc.addPage()
+        currentPage++
+        y = mTop
+        drawTopBar()
       }
 
-      let y = marginTop
+      // Estimate height of text block
+      const estimateH = (text: string, fontSize: number, width: number): number => {
+        doc.setFontSize(fontSize)
+        const lines = doc.splitTextToSize(text, width)
+        return lines.length * lineH
+      }
 
-      // Title page header
-      doc.setFontSize(18)
+      // Title
+      doc.setFontSize(16)
       doc.setFont('helvetica', 'bold')
       doc.setTextColor(37, 99, 235)
-      doc.text(`${questionSet.subject}`, marginL, y)
-      y += 8
+      doc.text(questionSet.subject || 'Revision Questions', mL, y)
+      y += 7
 
-      doc.setFontSize(11)
+      doc.setFontSize(10)
       doc.setFont('helvetica', 'normal')
       doc.setTextColor(100, 100, 100)
-      doc.text(`Class ${questionSet.class_level}  ·  ${questions.length} Questions  ·  ReviseRight.in`, marginL, y)
-      y += 6
+      doc.text(`Class ${questionSet.class_level}  ·  ${questions.length} Questions  ·  ReviseRight.in`, mL, y)
+      y += 4
 
-      // Divider line
+      // Title underline
       doc.setDrawColor(37, 99, 235)
       doc.setLineWidth(0.5)
-      doc.line(marginL, y, pageW - marginR, y)
-      y += 8
+      doc.line(mL, y, pageW - mR, y)
+      y += 6
       doc.setLineWidth(0.2)
-      doc.setDrawColor(0, 0, 0)
+      doc.setDrawColor(200, 200, 200)
 
-      // Group questions by type
+      // Group by type
       const grouped: Record<string, any[]> = {}
       questions.forEach((q: any) => {
         if (!grouped[q.type]) grouped[q.type] = []
@@ -140,81 +161,116 @@ export default function ResultsContent() {
       let globalNum = 1
 
       Object.entries(grouped).forEach(([type, qs]) => {
-        // Section header
-        checkPage(16)
-        y += 4
+        // Section header — check if it fits
+        if (y + 14 > maxY) newPage()
+
+        // Section header bar
+        y += 3
         doc.setFillColor(37, 99, 235)
-        doc.rect(marginL, y - 5, contentW, 8, 'F')
+        doc.rect(mL, y - 4, cW, 8, 'F')
         doc.setFontSize(10)
         doc.setFont('helvetica', 'bold')
         doc.setTextColor(255, 255, 255)
-        doc.text(`${typeLabels[type] || type}  (${qs.length} questions)`, marginL + 3, y)
-        y += 7
+        doc.text(`${typeLabels[type] || type}   (${qs.length} question${qs.length > 1 ? 's' : ''})`, mL + 3, y)
+        y += 8
         doc.setTextColor(0, 0, 0)
 
         qs.forEach((q: any) => {
-          // Question number + text
-          checkPage(12)
+          // Estimate total height needed for this question + answer
+          const qText = `${globalNum}. ${q.question}`
+          const qH = estimateH(qText, 10, cW)
+
+          let optH = 0
+          if (q.options) {
+            q.options.forEach((opt: string) => {
+              optH += estimateH(opt, 9.5, cW / 2 - 4)
+            })
+            optH = Math.ceil(q.options.length / 2) * lineH + 4
+          }
+
+          const ansH = estimateH(`Answer: ${q.answer}`, 9.5, cW - 10) + 8
+
+          const totalH = qH + optH + ansH + 10
+
+          // If entire Q+A doesn't fit, go to new page
+          if (y + totalH > maxY) newPage()
+
+          // Question text — NO box
           y += 3
-
-          // Question label box
-          doc.setFillColor(240, 245, 255)
-          doc.setDrawColor(200, 215, 255)
-          const qLines = doc.splitTextToSize(`${globalNum}. ${q.question}`, contentW - 4)
-          const qBoxH = qLines.length * 5 + 6
-          checkPage(qBoxH)
-          doc.rect(marginL, y - 4, contentW, qBoxH, 'FD')
           doc.setFontSize(10)
-          doc.setFont('helvetica', 'normal')
+          doc.setFont('helvetica', 'bold')
           doc.setTextColor(17, 24, 39)
-          doc.text(qLines, marginL + 2, y)
-          y += qBoxH - 2
+          const qLines = doc.splitTextToSize(qText, cW)
+          doc.text(qLines, mL, y)
+          y += qLines.length * lineH + 2
 
-          // Options for MCQ
+          // Options for MCQ — 2 per row
           if (q.options && q.options.length > 0) {
-            y += 2
-            // 2 options per row
-            const optPairs = []
+            doc.setFontSize(9.5)
+            doc.setFont('helvetica', 'normal')
+            doc.setTextColor(55, 65, 81)
             for (let i = 0; i < q.options.length; i += 2) {
-              optPairs.push([q.options[i], q.options[i+1]])
+              const opt1Lines = doc.splitTextToSize(q.options[i] || '', cW / 2 - 4)
+              const opt2Lines = q.options[i+1] ? doc.splitTextToSize(q.options[i+1], cW / 2 - 4) : []
+              doc.text(opt1Lines, mL + 4, y)
+              if (opt2Lines.length > 0) doc.text(opt2Lines, mL + cW / 2 + 2, y)
+              y += Math.max(opt1Lines.length, opt2Lines.length || 1) * lineH
             }
-            optPairs.forEach(pair => {
-              checkPage(7)
+            y += 2
+          }
+
+          // Answer box — check again if it fits after question
+          if (y + ansH > maxY) {
+            // Answer doesn't fit — move everything to next page
+            // Go back and redraw question on new page
+            newPage()
+            doc.setFontSize(10)
+            doc.setFont('helvetica', 'bold')
+            doc.setTextColor(17, 24, 39)
+            doc.text(qLines, mL, y)
+            y += qLines.length * lineH + 2
+            if (q.options && q.options.length > 0) {
               doc.setFontSize(9.5)
               doc.setFont('helvetica', 'normal')
               doc.setTextColor(55, 65, 81)
-              const opt1 = doc.splitTextToSize(pair[0] || '', contentW / 2 - 5)
-              doc.text(opt1, marginL + 4, y)
-              if (pair[1]) {
-                const opt2 = doc.splitTextToSize(pair[1], contentW / 2 - 5)
-                doc.text(opt2, marginL + contentW / 2 + 2, y)
+              for (let i = 0; i < q.options.length; i += 2) {
+                const opt1Lines = doc.splitTextToSize(q.options[i] || '', cW / 2 - 4)
+                const opt2Lines = q.options[i+1] ? doc.splitTextToSize(q.options[i+1], cW / 2 - 4) : []
+                doc.text(opt1Lines, mL + 4, y)
+                if (opt2Lines.length > 0) doc.text(opt2Lines, mL + cW / 2 + 2, y)
+                y += Math.max(opt1Lines.length, opt2Lines.length || 1) * lineH
               }
-              y += Math.max(opt1.length, 1) * 5
-            })
+              y += 2
+            }
           }
 
-          // Answer box
-          y += 2
-          const answerText = `Answer: ${q.answer}`
-          const ansLines = doc.splitTextToSize(answerText, contentW - 8)
-          const ansBoxH = ansLines.length * 5 + 6
-          checkPage(ansBoxH)
+          // Draw answer box with equal padding on all sides (4mm padding)
+          const pad = 4
+          const answerLabel = 'Answer:'
+          doc.setFontSize(9.5)
+          doc.setFont('helvetica', 'normal')
+          const answerBody = doc.splitTextToSize(q.answer, cW - pad * 2 - 18)
+          const boxH = answerBody.length * lineH + pad * 2 + 2
+          
           doc.setFillColor(240, 253, 244)
           doc.setDrawColor(134, 239, 172)
-          doc.rect(marginL, y - 4, contentW, ansBoxH, 'FD')
-          doc.setFontSize(9.5)
+          doc.setLineWidth(0.3)
+          doc.rect(mL, y, cW, boxH, 'FD')
+          
+          // "Answer:" label in bold green
           doc.setFont('helvetica', 'bold')
           doc.setTextColor(22, 101, 52)
-          // Write "Answer:" label
-          doc.text('Answer:', marginL + 2, y)
-          // Write answer text indented
+          doc.text(answerLabel, mL + pad, y + pad + 3.5)
+          
+          // Answer content
           doc.setFont('helvetica', 'normal')
-          const answerOnly = doc.splitTextToSize(q.answer, contentW - 22)
-          doc.text(answerOnly, marginL + 18, y)
-          y += Math.max(ansLines.length, answerOnly.length) * 5 + 2
+          doc.text(answerBody, mL + pad + 18, y + pad + 3.5)
+          
+          y += boxH + 6
 
           doc.setTextColor(0, 0, 0)
-          doc.setDrawColor(0, 0, 0)
+          doc.setDrawColor(200, 200, 200)
+          doc.setLineWidth(0.2)
 
           globalNum++
         })
@@ -222,13 +278,13 @@ export default function ResultsContent() {
         y += 4
       })
 
-      // Add decorations to last page
-      addPageDecorations()
+      // Final page footer
+      drawFooter(currentPage)
 
       doc.save(`ReviseRight-${questionSet.subject}-Class${questionSet.class_level}.pdf`)
-    } catch (err) {
+    } catch (err: any) {
       console.error('PDF error:', err)
-      alert('PDF download failed. Please try again.')
+      alert('PDF download failed: ' + err.message)
     }
     setDownloading(false)
   }
@@ -270,7 +326,7 @@ export default function ResultsContent() {
             {canDownload ? (
               <button onClick={handleDownloadPDF} disabled={downloading}
                 style={{background:'#2563EB',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 18px',fontSize:'14px',fontWeight:'500',cursor:'pointer',opacity:downloading?0.7:1}}>
-                {downloading ? 'Preparing...' : '⬇ Download PDF'}
+                {downloading ? 'Preparing PDF...' : '⬇ Download PDF'}
               </button>
             ) : (
               <Link href="/pricing" style={{background:'transparent',color:'#374151',border:'1px solid #D1D5DB',borderRadius:'8px',padding:'9px 18px',fontSize:'13px',fontWeight:'500',textDecoration:'none'}}>Upgrade for PDF</Link>
@@ -288,7 +344,7 @@ export default function ResultsContent() {
         )}
 
         {/* Reveal all toggle */}
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.25rem'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.25rem',flexWrap:'wrap',gap:'8px'}}>
           <p style={{fontSize:'13px',color:'#6B7280'}}>Click <strong>Show answer</strong> after attempting each question</p>
           <button onClick={toggleAll}
             style={{background:allRevealed?'#F3F4F6':'#2563EB',color:allRevealed?'#374151':'#fff',border:'1px solid',borderColor:allRevealed?'#D1D5DB':'#2563EB',borderRadius:'8px',padding:'7px 16px',fontSize:'13px',fontWeight:'500',cursor:'pointer'}}>
