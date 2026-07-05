@@ -30,7 +30,12 @@ export default function SignupPage() {
         return
       }
       if (data?.user) {
-        setStep(2)
+        // If email confirmation is disabled, user is already confirmed - go straight to dashboard
+        if (data.session) {
+          router.push('/dashboard')
+        } else {
+          setStep(2)
+        }
       } else {
         setError('Signup failed — please try again.')
       }
