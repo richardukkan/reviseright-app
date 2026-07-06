@@ -92,7 +92,7 @@ export default function ResultsContent() {
         if (q.leftColumn) parts = [...parts, ...q.leftColumn]
         if (q.rightColumn) parts = [...parts, ...q.rightColumn]
         return parts.filter(p => typeof p === 'string').join(' ')
-      }).join(' ')
+      }).join(' ') + ' ' + (questionSet.subject || '')
 
       const scriptsUsed = new Set<string>()
       for (const char of allText) {
@@ -241,10 +241,12 @@ export default function ResultsContent() {
         return lines.length * lineH
       }
 
-      doc.setFont('helvetica', 'bold')
+      // --- FIX: chapter title now routed through setFontForText so Devanagari titles render correctly ---
+      const subjectText = questionSet.subject || 'Revision Questions'
+      setFontForText(subjectText, 'bold')
       doc.setFontSize(16)
       doc.setTextColor(37, 99, 235)
-      doc.text(questionSet.subject || 'Revision Questions', mL, y)
+      doc.text(subjectText, mL, y)
       y += 7
 
       doc.setFont('helvetica', 'normal')
@@ -468,7 +470,9 @@ export default function ResultsContent() {
 
       drawFooter(currentPage)
 
-      doc.save(`ReviseRight-${questionSet.subject}-Class${questionSet.class_level}.pdf`)
+      // --- FIX: sanitize filename to strip non-ASCII characters (Devanagari etc. can break filenames) ---
+      const safeSubject = (questionSet.subject || 'Revision-Questions').replace(/[^\x20-\x7E]/g, '').trim() || 'Revision-Questions'
+      doc.save(`ReviseRight-${safeSubject}-Class${questionSet.class_level}.pdf`)
     } catch (err: any) {
       console.error('PDF error:', err)
       alert('PDF download failed: ' + err.message)
