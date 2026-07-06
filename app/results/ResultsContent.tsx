@@ -58,16 +58,14 @@ export default function ResultsContent() {
       const doc = new jsPDF({ unit: 'mm', format: 'a4' })
       const questions = questionSet.questions || []
 
-      // Page dimensions
       const pageW = 210
       const pageH = 297
-      const mL = 15        // left margin
-      const mR = 15        // right margin
-      const cW = pageW - mL - mR  // content width = 180mm
-      const mTop = 30      // top margin (below watermark)
-      const mBot = 18      // bottom margin (above footer)
+      const mL = 15
+      const mR = 15
+      const cW = pageW - mL - mR
+      const mBot = 18
       const maxY = pageH - mBot
-      const lineH = 5.5   // line height for body text
+      const lineH = 5.5
 
       const typeLabels: Record<string, string> = {
         mcq: 'MCQ', fill: 'Fill in the Blank', truefalse: 'True or False',
@@ -79,27 +77,39 @@ export default function ResultsContent() {
       const email = profile.email || ''
       const phone = profile.phone || ''
 
-      // Draw top warning bar on current page
+      const barPadX = 2
+      const barFontSize = 7
+      doc.setFontSize(barFontSize)
+      doc.setFont('helvetica', 'bold')
+      const line1Text = `⚠  GENERATED FOR: ${name}  |  ${email}${phone ? '  |  ' + phone : ''}`
+      const line2Text = `ReviseRight.in  |  NOT FOR REDISTRIBUTION  |  Sharing this document is a violation of terms.`
+      const line1Wrapped = doc.splitTextToSize(line1Text, cW - barPadX * 2)
+      const line2Wrapped = doc.splitTextToSize(line2Text, cW - barPadX * 2)
+      const barLines = [...line1Wrapped, ...line2Wrapped]
+      const barLineH = 3.6
+      const barTopY = 4
+      const barInnerPad = 3
+      const barH = barLines.length * barLineH + barInnerPad * 2 - 1.5
+      const mTop = barTopY + barH + 8
+
       const drawTopBar = () => {
-        // Yellow warning background
         doc.setFillColor(255, 243, 205)
-        doc.rect(mL, 4, cW, 12, 'F')
+        doc.rect(mL, barTopY, cW, barH, 'F')
         doc.setDrawColor(230, 160, 0)
         doc.setLineWidth(0.4)
-        doc.rect(mL, 4, cW, 12, 'S')
+        doc.rect(mL, barTopY, cW, barH, 'S')
 
-        // Warning text — two lines to avoid cutoff
-        doc.setFontSize(7)
+        doc.setFontSize(barFontSize)
         doc.setFont('helvetica', 'bold')
         doc.setTextColor(120, 60, 0)
-        const line1 = `⚠  GENERATED FOR: ${name}  |  ${email}${phone ? '  |  ' + phone : ''}`
-        const line2 = `ReviseRight.in  |  NOT FOR REDISTRIBUTION  |  Sharing this document is a violation of terms.`
-        doc.text(line1, mL + 2, 10, { maxWidth: cW - 4 })
-        doc.text(line2, mL + 2, 14.5, { maxWidth: cW - 4 })
+        let ty = barTopY + barInnerPad + 2.5
+        barLines.forEach((line: string) => {
+          doc.text(line, mL + barPadX, ty)
+          ty += barLineH
+        })
         doc.setLineWidth(0.2)
       }
 
-      // Draw bottom footer
       const drawFooter = (pageNum: number) => {
         doc.setFontSize(7)
         doc.setFont('helvetica', 'normal')
@@ -114,7 +124,6 @@ export default function ResultsContent() {
       drawTopBar()
       drawFooter(currentPage)
 
-      // Add new page helper
       const newPage = () => {
         drawFooter(currentPage)
         doc.addPage()
@@ -123,14 +132,12 @@ export default function ResultsContent() {
         drawTopBar()
       }
 
-      // Estimate height of text block
       const estimateH = (text: string, fontSize: number, width: number): number => {
         doc.setFontSize(fontSize)
         const lines = doc.splitTextToSize(text, width)
         return lines.length * lineH
       }
 
-      // Title
       doc.setFontSize(16)
       doc.setFont('helvetica', 'bold')
       doc.setTextColor(37, 99, 235)
@@ -143,7 +150,6 @@ export default function ResultsContent() {
       doc.text(`Class ${questionSet.class_level}  ·  ${questions.length} Questions  ·  ReviseRight.in`, mL, y)
       y += 4
 
-      // Title underline
       doc.setDrawColor(37, 99, 235)
       doc.setLineWidth(0.5)
       doc.line(mL, y, pageW - mR, y)
@@ -151,7 +157,6 @@ export default function ResultsContent() {
       doc.setLineWidth(0.2)
       doc.setDrawColor(200, 200, 200)
 
-      // Group by type
       const grouped: Record<string, any[]> = {}
       questions.forEach((q: any) => {
         if (!grouped[q.type]) grouped[q.type] = []
@@ -161,10 +166,8 @@ export default function ResultsContent() {
       let globalNum = 1
 
       Object.entries(grouped).forEach(([type, qs]) => {
-        // Section header — check if it fits
         if (y + 14 > maxY) newPage()
 
-        // Section header bar
         y += 3
         doc.setFillColor(37, 99, 235)
         doc.rect(mL, y - 4, cW, 8, 'F')
@@ -176,7 +179,79 @@ export default function ResultsContent() {
         doc.setTextColor(0, 0, 0)
 
         qs.forEach((q: any) => {
-          // Estimate total height needed for this question + answer
+
+          if (type === 'match') {
+            const instruction = `${globalNum}. ${q.instruction || 'Match the following:'}`
+            const leftCol: string[] = q.leftColumn || []
+            const rightCol: string[] = q.rightColumn || []
+            const rowCount = Math.max(leftCol.length, rightCol.length)
+            const colW = cW / 2 - 4
+
+            const instrH = estimateH(instruction, 10, cW)
+            const rowsH = rowCount * lineH + 6
+            const answerText = Array.isArray(q.answer) ? q.answer.join(', ') : String(q.answer || '')
+            const ansH = estimateH(`Answer: ${answerText}`, 9.5, cW - 10) + 8
+            const totalH = instrH + rowsH + ansH + 12
+
+            if (y + totalH > maxY) newPage()
+
+            y += 3
+            doc.setFontSize(10)
+            doc.setFont('helvetica', 'bold')
+            doc.setTextColor(17, 24, 39)
+            const instrLines = doc.splitTextToSize(instruction, cW)
+            doc.text(instrLines, mL, y)
+            y += instrLines.length * lineH + 3
+
+            doc.setFontSize(9)
+            doc.setFont('helvetica', 'bold')
+            doc.setTextColor(37, 99, 235)
+            doc.text('Column A', mL + 2, y)
+            doc.text('Column B', mL + cW / 2 + 2, y)
+            y += lineH
+
+            doc.setDrawColor(220, 220, 220)
+            doc.line(mL + cW / 2, y - rowCount * lineH - 2, mL + cW / 2, y + rowCount * lineH)
+
+            doc.setFontSize(9.5)
+            doc.setFont('helvetica', 'normal')
+            doc.setTextColor(55, 65, 81)
+            for (let i = 0; i < rowCount; i++) {
+              const leftLines = doc.splitTextToSize(leftCol[i] || '', colW)
+              const rightLines = doc.splitTextToSize(rightCol[i] || '', colW)
+              doc.text(leftLines, mL + 2, y)
+              doc.text(rightLines, mL + cW / 2 + 2, y)
+              y += Math.max(leftLines.length, rightLines.length, 1) * lineH
+            }
+            y += 3
+
+            const pad = 4
+            doc.setFontSize(9.5)
+            doc.setFont('helvetica', 'normal')
+            const answerBody = doc.splitTextToSize(answerText, cW - pad * 2 - 18)
+            const boxH = answerBody.length * lineH + pad * 2 + 2
+
+            if (y + boxH > maxY) newPage()
+
+            doc.setFillColor(240, 253, 244)
+            doc.setDrawColor(134, 239, 172)
+            doc.setLineWidth(0.3)
+            doc.rect(mL, y, cW, boxH, 'FD')
+            doc.setFont('helvetica', 'bold')
+            doc.setTextColor(22, 101, 52)
+            doc.text('Answer:', mL + pad, y + pad + 3.5)
+            doc.setFont('helvetica', 'normal')
+            doc.text(answerBody, mL + pad + 18, y + pad + 3.5)
+
+            y += boxH + 6
+            doc.setTextColor(0, 0, 0)
+            doc.setDrawColor(200, 200, 200)
+            doc.setLineWidth(0.2)
+
+            globalNum++
+            return
+          }
+
           const qText = `${globalNum}. ${q.question}`
           const qH = estimateH(qText, 10, cW)
 
@@ -189,13 +264,10 @@ export default function ResultsContent() {
           }
 
           const ansH = estimateH(`Answer: ${q.answer}`, 9.5, cW - 10) + 8
-
           const totalH = qH + optH + ansH + 10
 
-          // If entire Q+A doesn't fit, go to new page
           if (y + totalH > maxY) newPage()
 
-          // Question text — NO box
           y += 3
           doc.setFontSize(10)
           doc.setFont('helvetica', 'bold')
@@ -204,7 +276,6 @@ export default function ResultsContent() {
           doc.text(qLines, mL, y)
           y += qLines.length * lineH + 2
 
-          // Options for MCQ — 2 per row
           if (q.options && q.options.length > 0) {
             doc.setFontSize(9.5)
             doc.setFont('helvetica', 'normal')
@@ -219,10 +290,7 @@ export default function ResultsContent() {
             y += 2
           }
 
-          // Answer box — check again if it fits after question
           if (y + ansH > maxY) {
-            // Answer doesn't fit — move everything to next page
-            // Go back and redraw question on new page
             newPage()
             doc.setFontSize(10)
             doc.setFont('helvetica', 'bold')
@@ -244,28 +312,25 @@ export default function ResultsContent() {
             }
           }
 
-          // Draw answer box with equal padding on all sides (4mm padding)
           const pad = 4
           const answerLabel = 'Answer:'
           doc.setFontSize(9.5)
           doc.setFont('helvetica', 'normal')
           const answerBody = doc.splitTextToSize(q.answer, cW - pad * 2 - 18)
           const boxH = answerBody.length * lineH + pad * 2 + 2
-          
+
           doc.setFillColor(240, 253, 244)
           doc.setDrawColor(134, 239, 172)
           doc.setLineWidth(0.3)
           doc.rect(mL, y, cW, boxH, 'FD')
-          
-          // "Answer:" label in bold green
+
           doc.setFont('helvetica', 'bold')
           doc.setTextColor(22, 101, 52)
           doc.text(answerLabel, mL + pad, y + pad + 3.5)
-          
-          // Answer content
+
           doc.setFont('helvetica', 'normal')
           doc.text(answerBody, mL + pad + 18, y + pad + 3.5)
-          
+
           y += boxH + 6
 
           doc.setTextColor(0, 0, 0)
@@ -278,7 +343,6 @@ export default function ResultsContent() {
         y += 4
       })
 
-      // Final page footer
       drawFooter(currentPage)
 
       doc.save(`ReviseRight-${questionSet.subject}-Class${questionSet.class_level}.pdf`)
@@ -316,7 +380,6 @@ export default function ResultsContent() {
       <Navbar user={user} />
       <div style={{maxWidth:'768px',margin:'0 auto',padding:'2.5rem 1.5rem'}}>
 
-        {/* Header */}
         <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:'1.5rem',gap:'1rem',flexWrap:'wrap'}}>
           <div>
             <h1 style={{fontSize:'22px',fontWeight:'500',color:'#111827'}}>{questionSet.subject}</h1>
@@ -335,7 +398,6 @@ export default function ResultsContent() {
           </div>
         </div>
 
-        {/* Upgrade banner */}
         {!canDownload && (
           <div style={{background:'#EFF6FF',border:'1px solid #DBEAFE',borderRadius:'12px',padding:'1rem 1.25rem',marginBottom:'1.5rem',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'1rem',flexWrap:'wrap'}}>
             <p style={{fontSize:'14px',fontWeight:'500',color:'#1E3A8A'}}>PDF download available on Topper & Champion plans</p>
@@ -343,7 +405,6 @@ export default function ResultsContent() {
           </div>
         )}
 
-        {/* Reveal all toggle */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.25rem',flexWrap:'wrap',gap:'8px'}}>
           <p style={{fontSize:'13px',color:'#6B7280'}}>Click <strong>Show answer</strong> after attempting each question</p>
           <button onClick={toggleAll}
@@ -352,7 +413,6 @@ export default function ResultsContent() {
           </button>
         </div>
 
-        {/* Questions */}
         <div style={{display:'flex',flexDirection:'column',gap:'1.25rem'}}>
           {Object.entries(groupedQuestions).map(([type, qs]) => (
             <div key={type} style={{background:'#fff',border:'1px solid #E5E7EB',borderRadius:'12px',padding:'1.5rem'}}>
@@ -364,6 +424,41 @@ export default function ResultsContent() {
                 {qs.map((q: any, i: number) => {
                   const globalIdx = questionIndices[type][i]
                   const isRevealed = !!revealedAnswers[globalIdx]
+
+                  if (type === 'match') {
+                    const leftCol: string[] = q.leftColumn || []
+                    const rightCol: string[] = q.rightColumn || []
+                    const rowCount = Math.max(leftCol.length, rightCol.length)
+                    const answerText = Array.isArray(q.answer) ? q.answer.join(', ') : String(q.answer || '')
+                    return (
+                      <div key={i} style={{borderBottom:'1px solid #F9FAFB',paddingBottom:'1.25rem'}}>
+                        <p style={{fontSize:'15px',fontWeight:'500',color:'#1F2937',marginBottom:'0.75rem'}}>{i + 1}. {q.instruction || 'Match the following:'}</p>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0',border:'1px solid #E5E7EB',borderRadius:'8px',overflow:'hidden',marginBottom:'0.75rem'}}>
+                          <div style={{padding:'8px 12px',background:'#EFF6FF',fontWeight:'600',fontSize:'13px',color:'#1D4ED8',borderRight:'1px solid #E5E7EB',borderBottom:'1px solid #E5E7EB'}}>Column A</div>
+                          <div style={{padding:'8px 12px',background:'#EFF6FF',fontWeight:'600',fontSize:'13px',color:'#1D4ED8',borderBottom:'1px solid #E5E7EB'}}>Column B</div>
+                          {Array.from({ length: rowCount }).map((_, rowI) => (
+                            <>
+                              <div key={`l-${rowI}`} style={{padding:'8px 12px',fontSize:'14px',color:'#374151',borderRight:'1px solid #F3F4F6',borderBottom: rowI < rowCount - 1 ? '1px solid #F3F4F6' : 'none'}}>{leftCol[rowI] || ''}</div>
+                              <div key={`r-${rowI}`} style={{padding:'8px 12px',fontSize:'14px',color:'#374151',borderBottom: rowI < rowCount - 1 ? '1px solid #F3F4F6' : 'none'}}>{rightCol[rowI] || ''}</div>
+                            </>
+                          ))}
+                        </div>
+                        {isRevealed ? (
+                          <div style={{background:'#F0FDF4',border:'1px solid #DCFCE7',borderRadius:'8px',padding:'10px 14px',display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:'8px'}}>
+                            <p style={{fontSize:'13px',color:'#166534'}}><strong>Answer:</strong> {answerText}</p>
+                            <button onClick={() => toggleAnswer(String(globalIdx))}
+                              style={{background:'none',border:'none',color:'#6B7280',fontSize:'12px',cursor:'pointer',flexShrink:0,padding:'0'}}>Hide</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => toggleAnswer(String(globalIdx))}
+                            style={{background:'#F9FAFB',border:'1px solid #E5E7EB',borderRadius:'8px',padding:'8px 16px',fontSize:'13px',color:'#374151',cursor:'pointer',fontWeight:'500',width:'100%',textAlign:'left'}}>
+                            👁 Show answer
+                          </button>
+                        )}
+                      </div>
+                    )
+                  }
+
                   return (
                     <div key={i} style={{borderBottom:'1px solid #F9FAFB',paddingBottom:'1.25rem'}}>
                       <p style={{fontSize:'15px',fontWeight:'500',color:'#1F2937',marginBottom:'0.5rem'}}>{i + 1}. {q.question}</p>
