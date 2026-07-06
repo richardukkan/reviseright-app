@@ -6,6 +6,25 @@ import { supabase } from '@/lib/supabase'
 import Navbar from '@/components/Navbar'
 import { PLANS } from '@/lib/plans'
 
+// Unicode ranges for Indian scripts. Add more here as fonts are added —
+// no other code changes needed elsewhere.
+const SCRIPT_RANGES: { name: string; fontFile: string; fontName: string; test: (code: number) => boolean }[] = [
+  { name: 'Devanagari', fontFile: '/NotoSansDevanagari-Regular.ttf', fontName: 'NotoSansDevanagari', test: (c) => c >= 0x0900 && c <= 0x097F },
+  // Future: Bengali (0x0980–0x09FF), Gurmukhi (0x0A00–0x0A7F), Gujarati (0x0A80–0x0AFF),
+  // Tamil (0x0B80–0x0BFF), Telugu (0x0C00–0x0C7F), Kannada (0x0C80–0x0CFF),
+  // Malayalam (0x0D00–0x0D7F), Odia (0x0B00–0x0B7F)
+]
+
+const detectScript = (text: string): string | null => {
+  for (const char of text) {
+    const code = char.codePointAt(0) || 0
+    for (const script of SCRIPT_RANGES) {
+      if (script.test(code)) return script.name
+    }
+  }
+  return null
+}
+
 export default function ResultsContent() {
   const router = useRouter()
   const params = useSearchParams()
@@ -51,6 +70,20 @@ export default function ResultsContent() {
     }
   }
 
+  // Fetches a font file and converts to base64 for jsPDF's addFileToVFS
+  const loadFontAsBase64 = async (url: string): Promise<string> => {
+    const res = await fetch(url)
+    const buffer = await res.arrayBuffer()
+    let binary = ''
+    const bytes = new Uint8Array(buffer)
+    const chunkSize = 8192
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize)
+      binary += String.fromCharCode.apply(null, Array.from(chunk))
+    }
+    return btoa(binary)
+  }
+
   const handleDownloadPDF = async () => {
     setDownloading(true)
     try {
@@ -58,6 +91,53 @@ export default function ResultsContent() {
       const doc = new jsPDF({ unit: 'mm', format: 'a4' })
       const questions = questionSet.questions || []
 
+      // --- Detect which scripts are actually used in this question set, and load only those fonts ---
+      const allText = questions.map((q: any) => {
+        let parts = [q.question || '', q.answer, q.instruction || '']
+        if (Array.isArray(q.answer)) parts = [...parts, ...q.answer]
+        if (q.options) parts = [...parts, ...q.options]
+        if (q.leftColumn) parts = [...parts, ...q.leftColumn]
+        if (q.rightColumn) parts = [...parts, ...q.rightColumn]
+        return parts.filter(p => typeof p === 'string').join(' ')
+      }).join(' ')
+
+      const scriptsUsed = new Set<string>()
+      for (const char of allText) {
+        const code = char.codePointAt(0) || 0
+        for (const script of SCRIPT_RANGES) {
+          if (script.test(code)) scriptsUsed.add(script.name)
+        }
+      }
+
+      const loadedFonts: Record<string, string> = {} // script name -> jsPDF font name
+
+      for (const scriptName of scriptsUsed) {
+        const script = SCRIPT_RANGES.find(s => s.name === scriptName)
+        if (!script) continue
+        try {
+          const fontBase64 = await loadFontAsBase64(script.fontFile)
+          const vfsName = `${script.fontName}.ttf`
+          doc.addFileToVFS(vfsName, fontBase64)
+          doc.addFont(vfsName, script.fontName, 'normal')
+          loadedFonts[scriptName] = script.fontName
+        } catch (fontErr) {
+          console.error(`Failed to load font for ${scriptName}:`, fontErr)
+          // Falls back to Helvetica for this script if font loading fails — better than crashing
+        }
+      }
+
+      // Sets the correct font (custom Indian-script font or default Helvetica) based on text content
+      const setFontForText = (text: string, style: 'normal' | 'bold' = 'normal') => {
+        const script = detectScript(text)
+        if (script && loadedFonts[script]) {
+          // Custom embedded fonts only have a 'normal' weight available — bold falls back to normal weight
+          doc.setFont(loadedFonts[script], 'normal')
+        } else {
+          doc.setFont('helvetica', style)
+        }
+      }
+
+      // Page dimensions
       const pageW = 210
       const pageH = 297
       const mL = 15
@@ -79,9 +159,9 @@ export default function ResultsContent() {
 
       const barPadX = 2
       const barFontSize = 7
-      doc.setFontSize(barFontSize)
       doc.setFont('helvetica', 'bold')
-      const line1Text = `⚠  GENERATED FOR: ${name}  |  ${email}${phone ? '  |  ' + phone : ''}`
+      doc.setFontSize(barFontSize)
+      const line1Text = `WARNING — GENERATED FOR: ${name}  |  ${email}${phone ? '  |  ' + phone : ''}`
       const line2Text = `ReviseRight.in  |  NOT FOR REDISTRIBUTION  |  Sharing this document is a violation of terms.`
       const line1Wrapped = doc.splitTextToSize(line1Text, cW - barPadX * 2)
       const line2Wrapped = doc.splitTextToSize(line2Text, cW - barPadX * 2)
@@ -99,8 +179,8 @@ export default function ResultsContent() {
         doc.setLineWidth(0.4)
         doc.rect(mL, barTopY, cW, barH, 'S')
 
-        doc.setFontSize(barFontSize)
         doc.setFont('helvetica', 'bold')
+        doc.setFontSize(barFontSize)
         doc.setTextColor(120, 60, 0)
         let ty = barTopY + barInnerPad + 2.5
         barLines.forEach((line: string) => {
@@ -111,8 +191,8 @@ export default function ResultsContent() {
       }
 
       const drawFooter = (pageNum: number) => {
-        doc.setFontSize(7)
         doc.setFont('helvetica', 'normal')
+        doc.setFontSize(7)
         doc.setTextColor(160, 160, 160)
         doc.text(`${name} | ${email} | ReviseRight.in`, mL, pageH - 5)
         doc.text(`Page ${pageNum}`, pageW - mR, pageH - 5, { align: 'right' })
@@ -132,20 +212,22 @@ export default function ResultsContent() {
         drawTopBar()
       }
 
+      // Estimate height — sets font first so wrapping is measured correctly for the actual script
       const estimateH = (text: string, fontSize: number, width: number): number => {
+        setFontForText(text)
         doc.setFontSize(fontSize)
         const lines = doc.splitTextToSize(text, width)
         return lines.length * lineH
       }
 
-      doc.setFontSize(16)
       doc.setFont('helvetica', 'bold')
+      doc.setFontSize(16)
       doc.setTextColor(37, 99, 235)
       doc.text(questionSet.subject || 'Revision Questions', mL, y)
       y += 7
 
-      doc.setFontSize(10)
       doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
       doc.setTextColor(100, 100, 100)
       doc.text(`Class ${questionSet.class_level}  ·  ${questions.length} Questions  ·  ReviseRight.in`, mL, y)
       y += 4
@@ -171,8 +253,8 @@ export default function ResultsContent() {
         y += 3
         doc.setFillColor(37, 99, 235)
         doc.rect(mL, y - 4, cW, 8, 'F')
-        doc.setFontSize(10)
         doc.setFont('helvetica', 'bold')
+        doc.setFontSize(10)
         doc.setTextColor(255, 255, 255)
         doc.text(`${typeLabels[type] || type}   (${qs.length} question${qs.length > 1 ? 's' : ''})`, mL + 3, y)
         y += 8
@@ -181,7 +263,8 @@ export default function ResultsContent() {
         qs.forEach((q: any) => {
 
           if (type === 'match') {
-            const instruction = `${globalNum}. ${q.instruction || 'Match the following:'}`
+            const instructionText = q.instruction || 'Match the following:'
+            const instruction = `${globalNum}. ${instructionText}`
             const leftCol: string[] = q.leftColumn || []
             const rightCol: string[] = q.rightColumn || []
             const rowCount = Math.max(leftCol.length, rightCol.length)
@@ -196,15 +279,15 @@ export default function ResultsContent() {
             if (y + totalH > maxY) newPage()
 
             y += 3
+            setFontForText(instruction, 'bold')
             doc.setFontSize(10)
-            doc.setFont('helvetica', 'bold')
             doc.setTextColor(17, 24, 39)
             const instrLines = doc.splitTextToSize(instruction, cW)
             doc.text(instrLines, mL, y)
             y += instrLines.length * lineH + 3
 
-            doc.setFontSize(9)
             doc.setFont('helvetica', 'bold')
+            doc.setFontSize(9)
             doc.setTextColor(37, 99, 235)
             doc.text('Column A', mL + 2, y)
             doc.text('Column B', mL + cW / 2 + 2, y)
@@ -214,20 +297,23 @@ export default function ResultsContent() {
             doc.line(mL + cW / 2, y - rowCount * lineH - 2, mL + cW / 2, y + rowCount * lineH)
 
             doc.setFontSize(9.5)
-            doc.setFont('helvetica', 'normal')
             doc.setTextColor(55, 65, 81)
             for (let i = 0; i < rowCount; i++) {
-              const leftLines = doc.splitTextToSize(leftCol[i] || '', colW)
-              const rightLines = doc.splitTextToSize(rightCol[i] || '', colW)
+              const leftText = leftCol[i] || ''
+              const rightText = rightCol[i] || ''
+              setFontForText(leftText)
+              const leftLines = doc.splitTextToSize(leftText, colW)
               doc.text(leftLines, mL + 2, y)
+              setFontForText(rightText)
+              const rightLines = doc.splitTextToSize(rightText, colW)
               doc.text(rightLines, mL + cW / 2 + 2, y)
               y += Math.max(leftLines.length, rightLines.length, 1) * lineH
             }
             y += 3
 
             const pad = 4
+            setFontForText(answerText)
             doc.setFontSize(9.5)
-            doc.setFont('helvetica', 'normal')
             const answerBody = doc.splitTextToSize(answerText, cW - pad * 2 - 18)
             const boxH = answerBody.length * lineH + pad * 2 + 2
 
@@ -240,7 +326,7 @@ export default function ResultsContent() {
             doc.setFont('helvetica', 'bold')
             doc.setTextColor(22, 101, 52)
             doc.text('Answer:', mL + pad, y + pad + 3.5)
-            doc.setFont('helvetica', 'normal')
+            setFontForText(answerText)
             doc.text(answerBody, mL + pad + 18, y + pad + 3.5)
 
             y += boxH + 6
@@ -263,14 +349,15 @@ export default function ResultsContent() {
             optH = Math.ceil(q.options.length / 2) * lineH + 4
           }
 
-          const ansH = estimateH(`Answer: ${q.answer}`, 9.5, cW - 10) + 8
+          const ansText = String(q.answer)
+          const ansH = estimateH(`Answer: ${ansText}`, 9.5, cW - 10) + 8
           const totalH = qH + optH + ansH + 10
 
           if (y + totalH > maxY) newPage()
 
           y += 3
+          setFontForText(qText, 'bold')
           doc.setFontSize(10)
-          doc.setFont('helvetica', 'bold')
           doc.setTextColor(17, 24, 39)
           const qLines = doc.splitTextToSize(qText, cW)
           doc.text(qLines, mL, y)
@@ -278,35 +365,49 @@ export default function ResultsContent() {
 
           if (q.options && q.options.length > 0) {
             doc.setFontSize(9.5)
-            doc.setFont('helvetica', 'normal')
             doc.setTextColor(55, 65, 81)
             for (let i = 0; i < q.options.length; i += 2) {
-              const opt1Lines = doc.splitTextToSize(q.options[i] || '', cW / 2 - 4)
-              const opt2Lines = q.options[i+1] ? doc.splitTextToSize(q.options[i+1], cW / 2 - 4) : []
+              const opt1Text = q.options[i] || ''
+              const opt2Text = q.options[i+1] || ''
+              setFontForText(opt1Text)
+              const opt1Lines = doc.splitTextToSize(opt1Text, cW / 2 - 4)
               doc.text(opt1Lines, mL + 4, y)
-              if (opt2Lines.length > 0) doc.text(opt2Lines, mL + cW / 2 + 2, y)
-              y += Math.max(opt1Lines.length, opt2Lines.length || 1) * lineH
+              if (opt2Text) {
+                setFontForText(opt2Text)
+                const opt2Lines = doc.splitTextToSize(opt2Text, cW / 2 - 4)
+                doc.text(opt2Lines, mL + cW / 2 + 2, y)
+                y += Math.max(opt1Lines.length, opt2Lines.length) * lineH
+              } else {
+                y += opt1Lines.length * lineH
+              }
             }
             y += 2
           }
 
           if (y + ansH > maxY) {
             newPage()
+            setFontForText(qText, 'bold')
             doc.setFontSize(10)
-            doc.setFont('helvetica', 'bold')
             doc.setTextColor(17, 24, 39)
             doc.text(qLines, mL, y)
             y += qLines.length * lineH + 2
             if (q.options && q.options.length > 0) {
               doc.setFontSize(9.5)
-              doc.setFont('helvetica', 'normal')
               doc.setTextColor(55, 65, 81)
               for (let i = 0; i < q.options.length; i += 2) {
-                const opt1Lines = doc.splitTextToSize(q.options[i] || '', cW / 2 - 4)
-                const opt2Lines = q.options[i+1] ? doc.splitTextToSize(q.options[i+1], cW / 2 - 4) : []
+                const opt1Text = q.options[i] || ''
+                const opt2Text = q.options[i+1] || ''
+                setFontForText(opt1Text)
+                const opt1Lines = doc.splitTextToSize(opt1Text, cW / 2 - 4)
                 doc.text(opt1Lines, mL + 4, y)
-                if (opt2Lines.length > 0) doc.text(opt2Lines, mL + cW / 2 + 2, y)
-                y += Math.max(opt1Lines.length, opt2Lines.length || 1) * lineH
+                if (opt2Text) {
+                  setFontForText(opt2Text)
+                  const opt2Lines = doc.splitTextToSize(opt2Text, cW / 2 - 4)
+                  doc.text(opt2Lines, mL + cW / 2 + 2, y)
+                  y += Math.max(opt1Lines.length, opt2Lines.length) * lineH
+                } else {
+                  y += opt1Lines.length * lineH
+                }
               }
               y += 2
             }
@@ -314,9 +415,9 @@ export default function ResultsContent() {
 
           const pad = 4
           const answerLabel = 'Answer:'
+          setFontForText(ansText)
           doc.setFontSize(9.5)
-          doc.setFont('helvetica', 'normal')
-          const answerBody = doc.splitTextToSize(q.answer, cW - pad * 2 - 18)
+          const answerBody = doc.splitTextToSize(ansText, cW - pad * 2 - 18)
           const boxH = answerBody.length * lineH + pad * 2 + 2
 
           doc.setFillColor(240, 253, 244)
@@ -328,7 +429,8 @@ export default function ResultsContent() {
           doc.setTextColor(22, 101, 52)
           doc.text(answerLabel, mL + pad, y + pad + 3.5)
 
-          doc.setFont('helvetica', 'normal')
+          setFontForText(ansText)
+          doc.setTextColor(30, 30, 30)
           doc.text(answerBody, mL + pad + 18, y + pad + 3.5)
 
           y += boxH + 6
