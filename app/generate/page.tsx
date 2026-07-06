@@ -23,6 +23,54 @@ const MATHS_SUBJECTS = ['maths', 'math', 'mathematics', 'ganit']
 
 const isMaths = (subject: string) => MATHS_SUBJECTS.includes(subject.toLowerCase().trim())
 
+// Compresses an image file in the browser before upload.
+// Resizes to a max dimension and re-encodes as JPEG at reduced quality,
+// which keeps text sharp and legible while dramatically cutting file size.
+const compressImage = (file: File, maxDimension = 1600, quality = 0.7): Promise<File> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+
+      let { width, height } = img
+      if (width > height && width > maxDimension) {
+        height = Math.round((height * maxDimension) / width)
+        width = maxDimension
+      } else if (height > maxDimension) {
+        width = Math.round((width * maxDimension) / height)
+        height = maxDimension
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(file); return } // fallback: use original if canvas unsupported
+
+      ctx.drawImage(img, 0, 0, width, height)
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) { resolve(file); return } // fallback: use original if compression fails
+          const compressedFile = new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() })
+          resolve(compressedFile)
+        },
+        'image/jpeg',
+        quality
+      )
+    }
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      resolve(file) // fallback: use original if image fails to load
+    }
+
+    img.src = objectUrl
+  })
+}
+
 export default function GeneratePage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -34,6 +82,7 @@ export default function GeneratePage() {
   const [selected, setSelected] = useState<Record<string, boolean>>({ mcq: true, fill: true, short: true, critical: true })
   const [counts, setCounts] = useState<Record<string, number>>({ mcq: 10, fill: 5, truefalse: 5, oneword: 5, short: 5, long: 3, match: 5, define: 5, critical: 3 })
   const [generating, setGenerating] = useState(false)
+  const [compressing, setCompressing] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -60,12 +109,25 @@ export default function GeneratePage() {
     }
   }
 
-  const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newFiles = Array.from(e.target.files || []).slice(0, 15)
-    newFiles.sort((a, b) => a.name.localeCompare(b.name))
-    setFiles(newFiles)
-    const newPreviews = newFiles.map(f => URL.createObjectURL(f))
-    setPreviews(newPreviews)
+  const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawFiles = Array.from(e.target.files || []).slice(0, 15)
+    rawFiles.sort((a, b) => a.name.localeCompare(b.name))
+
+    setCompressing(true)
+    setError('')
+
+    try {
+      const compressedFiles = await Promise.all(rawFiles.map(f => compressImage(f)))
+      setFiles(compressedFiles)
+      const newPreviews = compressedFiles.map(f => URL.createObjectURL(f))
+      setPreviews(newPreviews)
+    } catch (err) {
+      // If compression fails entirely, fall back to original files rather than blocking the user
+      setFiles(rawFiles)
+      setPreviews(rawFiles.map(f => URL.createObjectURL(f)))
+    }
+
+    setCompressing(false)
   }
 
   const deleteImage = (index: number) => {
@@ -146,6 +208,15 @@ export default function GeneratePage() {
             <p style={{fontSize:'14px',fontWeight:'500',color:'#374151'}}>Click to upload photos</p>
             <p style={{fontSize:'12px',color:'#9CA3AF',marginTop:'4px'}}>JPG, PNG · Up to 15 pages</p>
           </label>
+          {compressing && (
+            <p style={{fontSize:'13px',color:'#2563EB',marginTop:'0.75rem',display:'flex',alignItems:'center',gap:'6px'}}>
+              <svg style={{animation:'spin 1s linear infinite',width:'14px',height:'14px'}} viewBox="0 0 24 24" fill="none">
+                <circle style={{opacity:0.25}} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path style={{opacity:0.75}} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              Optimising photos...
+            </p>
+          )}
           {previews.length > 0 && (
             <div style={{marginTop:'1rem'}}>
               <p style={{fontSize:'12px',color:'#6B7280',marginBottom:'8px'}}>{previews.length} pages uploaded — use arrows to reorder</p>
@@ -236,9 +307,9 @@ export default function GeneratePage() {
 
         {error && <div style={{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:'8px',padding:'0.75rem 1rem',color:'#DC2626',fontSize:'14px',marginBottom:'1rem'}}>{error}</div>}
 
-        <button onClick={handleGenerate} disabled={generating || files.length === 0}
+        <button onClick={handleGenerate} disabled={generating || compressing || files.length === 0}
           className="btn-primary"
-          style={{width:'100%',justifyContent:'center',padding:'12px',fontSize:'15px',opacity:(generating || files.length === 0) ? 0.6 : 1,cursor:(generating || files.length === 0) ? 'not-allowed' : 'pointer'}}>
+          style={{width:'100%',justifyContent:'center',padding:'12px',fontSize:'15px',opacity:(generating || compressing || files.length === 0) ? 0.6 : 1,cursor:(generating || compressing || files.length === 0) ? 'not-allowed' : 'pointer'}}>
           {generating ? (
             <span style={{display:'flex',alignItems:'center',gap:'8px'}}>
               <svg style={{animation:'spin 1s linear infinite',width:'16px',height:'16px'}} viewBox="0 0 24 24" fill="none">
