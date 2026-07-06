@@ -6,6 +6,20 @@ export const maxDuration = 60
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
+// Example schema for each question type — used to build a prompt example
+// containing ONLY the types the user actually selected.
+const TYPE_EXAMPLES: Record<string, string> = {
+  mcq: `{"type": "mcq", "question": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "answer": "A) ..."}`,
+  fill: `{"type": "fill", "question": "The ___ is ...", "answer": "..."}`,
+  truefalse: `{"type": "truefalse", "question": "...", "answer": "True"}`,
+  oneword: `{"type": "oneword", "question": "...", "answer": "..."}`,
+  short: `{"type": "short", "question": "...", "answer": "2-3 line answer"}`,
+  long: `{"type": "long", "question": "...", "answer": "detailed answer"}`,
+  match: `{"type": "match", "instruction": "Match the items in Column A with Column B", "leftColumn": ["1. Item one", "2. Item two", "3. Item three"], "rightColumn": ["a. Match one", "b. Match two", "c. Match three"], "answer": ["1-b", "2-a", "3-c"]}`,
+  define: `{"type": "define", "question": "Define ...", "answer": "..."}`,
+  critical: `{"type": "critical", "question": "Why/How/What if ...", "answer": "reasoning answer"}`,
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { images, subject, classLevel, questionTypes, userId } = await req.json()
@@ -35,31 +49,37 @@ export async function POST(req: NextRequest) {
     }
 
     // Build prompt
-    const qtList = questionTypes.map((qt: any) => `- ${qt.count} ${qt.label} questions`).join('\n')
+    const requestedTypeKeys = questionTypes.map((qt: any) => qt.type)
+    const qtList = questionTypes.map((qt: any) => {
+      if (qt.type === 'match') {
+        return `- 1 Match the Following question, with exactly ${qt.count} pairs to match`
+      }
+      return `- ${qt.count} ${qt.label} questions`
+    }).join('\n')
+
     const isMaths = ['maths', 'math', 'mathematics', 'ganit'].includes((subject || '').toLowerCase().trim())
+
+    // Build the example JSON using ONLY the requested types, so Claude has no
+    // template to copy from for types that weren't asked for.
+    const exampleQuestions = requestedTypeKeys.map((key: string) => TYPE_EXAMPLES[key]).filter(Boolean).join(',\n    ')
 
     const systemPrompt = `You are an expert Indian school teacher creating revision questions. 
 Generate questions appropriate for Class ${classLevel} students (aged ${classLevel + 5}-${classLevel + 6} years).
 ${isMaths ? 'This is a Maths chapter. Focus on numerical problems, calculations, and problem-solving. Use actual numbers and equations from the textbook pages.' : 'For Critical Thinking questions, create open-ended questions requiring reasoning beyond the text.'}
+CRITICAL: Only generate the exact question types listed in the request below, in the exact counts specified. Do NOT add any other question type under any circumstances, even if it seems helpful.
 Return ONLY valid JSON. No markdown, no backticks, no explanation.`
 
-    const userPrompt = `Based on these textbook pages${subject ? ` (${subject})` : ''}, generate for Class ${classLevel}:
+    const userPrompt = `Based on these textbook pages${subject ? ` (${subject})` : ''}, generate for Class ${classLevel} ONLY the following, and nothing else:
 
 ${qtList}
 
-Return ONLY this JSON structure:
+For "Match the Following": create ONE question with the exact number of pairs requested. leftColumn and rightColumn must be arrays of the same length, numbered/lettered as shown in the example. The "answer" field must be an array mapping each left item to its right match (e.g. "1-b").
+
+Return ONLY this JSON structure (matching exactly the types requested above, nothing more):
 {
   "title": "chapter topic",
   "questions": [
-    {"type": "mcq", "question": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "answer": "A) ..."},
-    {"type": "fill", "question": "The ___ is ...", "answer": "..."},
-    {"type": "truefalse", "question": "...", "answer": "True"},
-    {"type": "oneword", "question": "...", "answer": "..."},
-    {"type": "short", "question": "...", "answer": "2-3 line answer"},
-    {"type": "long", "question": "...", "answer": "detailed answer"},
-    {"type": "match", "question": "Match: Column A vs Column B", "answer": "1-b, 2-a, 3-d"},
-    {"type": "define", "question": "Define ...", "answer": "..."},
-    {"type": "critical", "question": "Why/How/What if ...", "answer": "reasoning answer"}
+    ${exampleQuestions}
   ]
 }`
 
@@ -97,6 +117,11 @@ Return ONLY this JSON structure:
 
     const parsed = JSON.parse(cleanText)
 
+    // Defensive filter: strip out any question types the model added
+    // that weren't actually requested, in case it doesn't follow instructions perfectly.
+    const requestedSet = new Set(requestedTypeKeys)
+    const filteredQuestions = (parsed.questions || []).filter((q: any) => requestedSet.has(q.type))
+
     // Save to DB
     const { data: questionSet } = await supabaseAdmin.from('question_sets').insert({
       user_id: userId,
@@ -104,7 +129,7 @@ Return ONLY this JSON structure:
       class_level: classLevel,
       pages_used: images.length,
       question_types: questionTypes,
-      questions: parsed.questions
+      questions: filteredQuestions
     }).select().single()
 
     // Update pages used
